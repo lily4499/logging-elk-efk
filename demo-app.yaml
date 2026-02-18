@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-logger
+  labels:
+    app: demo-logger
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-logger
+  template:
+    metadata:
+      labels:
+        app: demo-logger
+    spec:
+      containers:
+        - name: logger
+          image: busybox:1.36
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              i=1;
+              while true; do
+                echo "$(date -Iseconds) INFO request_id=$i service=demo-logger message='healthy request'";
+                if [ $((i % 5)) -eq 0 ]; then
+                  echo "$(date -Iseconds) ERROR request_id=$i service=demo-logger message='timeout talking to backend'" 1>&2;
+                fi
+                i=$((i+1));
+                sleep 2;
+              done
