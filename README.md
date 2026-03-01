@@ -1,30 +1,27 @@
 # Centralized Logging on Minikube (EFK) — Incident Log Search
 
-I built a lightweight **centralized logging stack (EFK = Elasticsearch + Fluentd + Kibana)** on **Minikube** to collect logs from all pods and namespaces in one place, then **search + filter** quickly during incidents (instead of tailing logs pod-by-pod).
+## Context
 
----
+In a real incident, I don’t want to jump pod-to-pod running `kubectl logs`. I want **one place** to search logs fast, filter by **namespace/pod**, and confirm what happened.
 
-## Purpose
-
-Enable a simple incident workflow on Kubernetes:
-
-**Alert → open Kibana → search errors → filter by namespace/pod → confirm root cause → validate fix**
+This project is a lightweight **centralized logging stack (EFK = Elasticsearch + Fluentd + Kibana)** running on **Minikube**.
 
 ---
 
 ## Problem
 
-During an incident, logs are often **scattered**:
+During incidents, logs are **scattered**:
 
-- Logs live inside pods (pods restart, logs rotate)
-- Many namespaces/services make it hard to know where to start
-- `kubectl logs` is useful, but incident response needs:
-  - full-text **search**
-  - **time-based** filtering
-  - correlation across services
-  - quick pattern detection (`error`, `timeout`, `500`)
+* Logs live inside pods (pods restart, logs rotate)
+* Many namespaces/services make it hard to know where to start
+* `kubectl logs` is useful, but incident response needs:
 
-**Bottom line:** I need one place to store and search logs across the cluster.
+  * full-text **search**
+  * **time-based** filtering
+  * correlation across services
+  * quick pattern detection (`error`, `timeout`, `500`)
+
+**Bottom line:** I need one place to store + search logs across the cluster.
 
 ---
 
@@ -32,12 +29,9 @@ During an incident, logs are often **scattered**:
 
 I deployed an **EFK pipeline** on Minikube:
 
-- **Fluentd (DaemonSet)** collects node/pod logs across the cluster
-- Fluentd forwards logs to **Elasticsearch** (storage + indexing)
-- **Kibana** reads from Elasticsearch so I can:
-  - search logs by keywords
-  - filter by namespace/pod/container
-  - zoom into a time range during the incident
+* **Fluentd (DaemonSet)** collects node/pod logs across the cluster
+* Fluentd forwards logs to **Elasticsearch** (storage + indexing)
+* **Kibana** reads from Elasticsearch so I can search + filter logs during incidents
 
 ---
 
@@ -45,207 +39,91 @@ I deployed an **EFK pipeline** on Minikube:
 
 ![EFK Architecture](screenshots/architecture.png)
 
-This diagram shows logs from all namespaces flowing into Fluentd on each node, then into Elasticsearch for indexing and storage, with Kibana used for searching and filtering by time, namespace, and pod.
+Logs from all namespaces → Fluentd on each node → Elasticsearch (index/store) → Kibana (search/filter).
 
 ---
 
-## Prerequisites
+## What I did  + screenshots
 
-- Minikube installed
-- kubectl installed
-- Enough resources for Elasticsearch (**recommended:** 4 CPU / 8GB RAM)
+### 1) Start Minikube with enough resources
 
----
+* Started Minikube (Elasticsearch needs memory/CPU)
+* Verified the node is Ready
 
-## Repo Structure
-
-```text
-centralized-logging-efk/
-├── README.md
-├── elasticsearch.yaml
-├── kibana.yaml
-├── fluentd-configmap.yaml
-├── fluentd-daemonset.yaml
-├── demo-app.yaml
-└── screenshots/
-    ├── architecture.png
-    ├── 01-efk-pods-running.png
-    ├── 02-elasticsearch-service.png
-    ├── 03-fluentd-daemonset.png
-    ├── 04-demo-logs.png
-    ├── 05-kibana-running.png
-    ├── 06-index-pattern.png
-    ├── 07-kibana-error-search.png
-    └── 08-filter-by-namespace.png
-````
+📸 `screenshots/00-minikube-node-ready.png` — Should show: node `Ready`
 
 ---
 
-## Step-by-step CLI (with screenshots)
+### 2) Create the logging namespace
 
-> Create screenshots folder (once):
-
-```bash
-mkdir -p screenshots
-```
-
-### 1) Start Minikube (allocate enough resources)
-
-```bash
-minikube start --cpus=4 --memory=8192
-kubectl get nodes -o wide
-```
-
-📸 `screenshots/00-minikube-node-ready.png` 
-Should show: node is `Ready`.
-
----
-
-### 2) Create a namespace for logging
-
-```bash
-kubectl create namespace logging
-kubectl get ns
-```
-
-📸 `screenshots/00-logging-namespace.png` 
-Should show: `logging` namespace exists.
+* Created a dedicated namespace to keep logging components separated
 
 ---
 
 ### 3) Deploy Elasticsearch (single-node for demo)
 
-```bash
-kubectl apply -n logging -f elasticsearch.yaml
-kubectl get pods -n logging -w
-```
+* Applied the Elasticsearch manifest
+* Verified pods are running + service/endpoints exist
 
-📸 `screenshots/01-efk-pods-running.png`
-![EFK Pods Running](screenshots/01-efk-pods-running.png)
-
-Validate Elasticsearch service:
-
-```bash
-kubectl get svc -n logging
-kubectl get endpoints -n logging
-kubectl logs -n logging deploy/elasticsearch --tail=50
-```
-
-📸 `screenshots/02-elasticsearch-service.png`
-![Elasticsearch Service](screenshots/02-elasticsearch-service.png)
+📸 `screenshots/01-efk-pods-running.png` — Should show: EFK pods running in `logging`
+📸 `screenshots/02-elasticsearch-service.png` — Should show: Elasticsearch service + endpoints
 
 ---
 
 ### 4) Deploy Kibana
 
-```bash
-kubectl apply -n logging -f kibana.yaml
-kubectl get pods -n logging -w
-kubectl get svc -n logging
-```
+* Applied the Kibana manifest
+* Verified Kibana pod and service are running
 
-📸 `screenshots/05-kibana-running.png`
-![Kibana Running](screenshots/05-kibana-running.png)
+📸 `screenshots/05-kibana-running.png` — Should show: Kibana pod Running + service available
+📸 `screenshots/05-kibana-home.png` — Should show: Kibana UI reachable in browser
 
 ---
 
-### 5) Deploy Fluentd (DaemonSet) to collect cluster logs
+### 5) Deploy Fluentd (DaemonSet) to collect logs
 
-```bash
-kubectl apply -n logging -f fluentd-configmap.yaml
-kubectl apply -n logging -f fluentd-daemonset.yaml
-kubectl get ds -n logging
-kubectl get pods -n logging -l app=fluentd -o wide
-```
+* Applied Fluentd ConfigMap + DaemonSet
+* Verified Fluentd is running on the node(s)
 
-📸 `screenshots/03-fluentd-daemonset.png`
-![Fluentd DaemonSet](screenshots/03-fluentd-daemonset.png)
-
-Confirm Fluentd is actually shipping logs:
-
-```bash
-kubectl logs -n logging ds/fluentd --tail=80
-```
+📸 `screenshots/03-fluentd-daemonset.png` — Should show: Fluentd DaemonSet ready + pods on node(s)
 
 ---
 
 ### 6) Generate demo logs (simulate an incident)
 
-Deploy a noisy demo app that outputs errors:
+* Deployed a demo app that produces noisy/error logs
+* Verified logs are being produced
 
-```bash
-kubectl create ns demo
-kubectl apply -n demo -f demo-app.yaml
-kubectl get pods -n demo -w
-```
-
-Confirm the demo app is producing logs:
-
-```bash
-kubectl logs -n demo deploy/demo-logger --tail=50
-```
-
-📸 `screenshots/04-demo-logs.png`
-![Demo Logs](screenshots/04-demo-logs.png)
+📸 `screenshots/04-demo-logs.png` — Should show: demo app logs with errors/noise
 
 ---
 
-### 7) Access Kibana UI (port-forward)
+### 7) In Kibana: create a Data View (Index Pattern)
 
-```bash
-kubectl port-forward -n logging svc/kibana 5601:5601
-```
+* Created a Data View so Kibana can query the indices
 
-Open in browser:
-
-* [http://localhost:5601](http://localhost:5601)
-
-📸 `screenshots/05-kibana-home.png` 
-Should show: Kibana UI is reachable.
+📸 `screenshots/06-index-pattern.png` — Should show: Data View created successfully
 
 ---
 
-### 8) Create a Data View (Index Pattern)
+### 8) Search + filter like an incident responder
 
-In Kibana:
+* Searched for errors
+* Filtered by namespace/pod to isolate the issue fast
 
-* **Stack Management → Data Views**
-* Create data view: `logstash-*` *(match Fluentd index name)*
-* Time field: `@timestamp`
-
-📸 `screenshots/06-index-pattern.png`
-![Index Pattern](screenshots/06-index-pattern.png)
+📸 `screenshots/07-kibana-error-search.png` — Should show: searching `error` results
+📸 `screenshots/08-filter-by-namespace.png` — Should show: filter by `demo` namespace / pod
 
 ---
 
-### 9) Search logs like an incident responder
+## Result
 
-Example queries in Kibana:
-
-* `error`
-* `kubernetes.namespace_name:"demo" AND "timeout"`
-* `kubernetes.pod_name:*demo* AND "500"`
-
-📸 `screenshots/07-kibana-error-search.png`
-![Error Search](screenshots/07-kibana-error-search.png)
-
-📸 `screenshots/08-filter-by-namespace.png`
-![Filter by Namespace](screenshots/08-filter-by-namespace.png)
-
----
-
-## Outcome
-
-After deploying EFK on Minikube, I can:
+After this setup, I can:
 
 * collect logs from **every pod** into one place
-* search by:
-
-  * keyword (`error`, `timeout`, `500`)
-  * time window
-  * namespace/pod/container
-* correlate failures across services during incidents
-* reduce troubleshooting time because log search is instant
+* search by **keyword** (`error`, `timeout`, `500`)
+* filter by **time window + namespace + pod/container**
+* troubleshoot faster because log search is instant (no more pod-by-pod guessing)
 
 ---
 
@@ -253,51 +131,75 @@ After deploying EFK on Minikube, I can:
 
 ### Kibana loads but shows “No data”
 
-Check Fluentd + Elasticsearch logs:
+* Fluentd may not be shipping logs, or indices aren’t created yet
+* Check Fluentd + Elasticsearch logs, and confirm indices exist
+
+### Elasticsearch keeps restarting (OOM)
+
+* Minikube doesn’t have enough memory/CPU
+* Restart Minikube with more resources
+
+### Fluentd is running but nothing appears in Elasticsearch
+
+* Check Fluentd ConfigMap output settings and Fluentd logs
+
+### Kibana can’t connect to Elasticsearch
+
+* Verify Kibana env vars and service DNS inside the `logging` namespace
+
+---
+
+## Useful CLI 
+
+### Start cluster
 
 ```bash
-kubectl logs -n logging ds/fluentd --tail=120
-kubectl logs -n logging deploy/elasticsearch --tail=120
+minikube start --cpus=4 --memory=8192
+kubectl get nodes -o wide
 ```
 
-Confirm indices exist:
+### Deploy EFK
+
+```bash
+kubectl create namespace logging
+
+kubectl apply -n logging -f elasticsearch.yaml
+kubectl apply -n logging -f kibana.yaml
+kubectl apply -n logging -f fluentd-configmap.yaml
+kubectl apply -n logging -f fluentd-daemonset.yaml
+
+kubectl get pods -n logging -o wide
+kubectl get svc -n logging
+kubectl get ds -n logging
+```
+
+### Deploy demo app + confirm logs
+
+```bash
+kubectl create ns demo
+kubectl apply -n demo -f demo-app.yaml
+kubectl get pods -n demo -w
+kubectl logs -n demo deploy/demo-logger --tail=50
+```
+
+### Access Kibana
+
+```bash
+kubectl port-forward -n logging svc/kibana 5601:5601
+```
+
+### Quick verify indices in Elasticsearch
 
 ```bash
 kubectl port-forward -n logging svc/elasticsearch 9200:9200
 curl -s http://localhost:9200/_cat/indices?v
 ```
 
----
-
-### Elasticsearch keeps restarting (OOM / not enough resources)
-
-Restart Minikube with more memory:
+### Useful log checks
 
 ```bash
-minikube stop
-minikube start --cpus=4 --memory=8192
-```
-
----
-
-### Fluentd is running but nothing appears in Elasticsearch
-
-Verify ConfigMap and Fluentd output settings:
-
-```bash
-kubectl get cm -n logging fluentd-config -o yaml | sed -n '1,220p'
-kubectl logs -n logging ds/fluentd --tail=200
-```
-
----
-
-### Kibana can’t connect to Elasticsearch
-
-Check Kibana env vars and service DNS:
-
-```bash
-kubectl describe pod -n logging -l app=kibana | sed -n '1,220p'
-kubectl get svc -n logging
+kubectl logs -n logging ds/fluentd --tail=120
+kubectl logs -n logging deploy/elasticsearch --tail=120
 ```
 
 ---
